@@ -16,6 +16,7 @@ from langdetect import detect, DetectorFactory
 from sentence_transformers import SentenceTransformer
 import opencc
 import sys
+import random
 
 # Set seed for language detection
 DetectorFactory.seed = 0
@@ -176,48 +177,114 @@ def verify_language(paragraphs, expected_lang):
     
     return verified_paragraphs
 
-def create_huggingface_dataset(chinese_paragraphs, english_paragraphs, output_dir="translation_dataset"):
+def create_huggingface_dataset(chinese_paragraphs, english_paragraphs, output_dir="translation_dataset", finetune_format=False):
     """Create and save the dataset in Hugging Face format.
     Assumes paragraphs are already aligned in the input files.
+    
+    Args:
+        chinese_paragraphs: List of Chinese paragraph dictionaries
+        english_paragraphs: List of English paragraph dictionaries
+        output_dir: Directory to save the dataset
+        finetune_format: Whether to create the dataset in finetune format
     """
     # Take the minimum length to ensure we have pairs
     min_len = min(len(chinese_paragraphs), len(english_paragraphs))
     
-    # Create pairs directly from the paragraphs in order
-    aligned_pairs = [
-        {
-            "chinese": chinese_paragraphs[i]["text"],
-            "english": english_paragraphs[i]["text"]
+    if finetune_format:
+        # Create data in finetune format (for LLM fine-tuning)
+        finetune_data = []
+        for i in range(min_len):
+            chinese_text = chinese_paragraphs[i]["text"]
+            english_text = english_paragraphs[i]["text"]
+            
+            # Create the message pairs
+            message_pair = [
+                {"from": "human", "value": f"translate following chinese into english -- {chinese_text}"},
+                {"from": "gpt", "value": f"{english_text}"}
+            ]
+            finetune_data.append(message_pair)
+        
+        # Save in JSON format
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, "finetune_data.json"), "w", encoding="utf-8") as f:
+            json.dump(finetune_data, f, ensure_ascii=False, indent=2)
+        
+        # Also save splits
+        train_ratio, val_ratio, test_ratio = 0.8, 0.1, 0.1
+        train_size = int(len(finetune_data) * train_ratio)
+        val_size = int(len(finetune_data) * val_ratio)
+        
+        # Randomly shuffle the data
+        random.seed(42)
+        random.shuffle(finetune_data)
+        
+        train_data = finetune_data[:train_size]
+        val_data = finetune_data[train_size:train_size+val_size]
+        test_data = finetune_data[train_size+val_size:]
+        
+        # Save the splits
+        os.makedirs(os.path.join(output_dir, "train"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "validation"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "test"), exist_ok=True)
+        
+        with open(os.path.join(output_dir, "train", "data.json"), "w", encoding="utf-8") as f:
+            json.dump(train_data, f, ensure_ascii=False, indent=2)
+        with open(os.path.join(output_dir, "validation", "data.json"), "w", encoding="utf-8") as f:
+            json.dump(val_data, f, ensure_ascii=False, indent=2)
+        with open(os.path.join(output_dir, "test", "data.json"), "w", encoding="utf-8") as f:
+            json.dump(test_data, f, ensure_ascii=False, indent=2)
+        
+        # Save a sample
+        sample_size = min(100, len(finetune_data))
+        with open(os.path.join(output_dir, "sample.json"), "w", encoding="utf-8") as f:
+            json.dump(finetune_data[:sample_size], f, ensure_ascii=False, indent=2)
+        
+        print(f"Created finetune dataset with {len(finetune_data)} translation pairs")
+        print(f"Train: {len(train_data)}, Validation: {len(val_data)}, Test: {len(test_data)}")
+        
+        # Return the data as a dictionary
+        return {
+            "train": train_data,
+            "validation": val_data,
+            "test": test_data,
+            "full": finetune_data
         }
-        for i in range(min_len)
-    ]
-    
-    # Prepare data in the format expected by the Dataset.from_dict method
-    dataset_dict = {
-        "translation": [
-            {"zh": pair["chinese"], "en": pair["english"]} 
-            for pair in aligned_pairs
+    else:
+        # Create pairs directly from the paragraphs in order (original format)
+        aligned_pairs = [
+            {
+                "chinese": chinese_paragraphs[i]["text"],
+                "english": english_paragraphs[i]["text"]
+            }
+            for i in range(min_len)
         ]
-    }
-    
-    # Create the dataset
-    dataset = Dataset.from_dict(dataset_dict)
-    
-    # Save dataset statistics
-    print(f"Created dataset with {len(dataset)} translation pairs")
-    
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Save the dataset in Hugging Face Arrow format
-    dataset.save_to_disk(output_dir)
-    
-    # Also save a sample in JSON format for inspection
-    sample_size = min(100, len(aligned_pairs))
-    with open(os.path.join(output_dir, "sample.json"), "w", encoding="utf-8") as f:
-        json.dump(aligned_pairs[:sample_size], f, ensure_ascii=False, indent=2)
-    
-    return dataset
+        
+        # Prepare data in the format expected by the Dataset.from_dict method
+        dataset_dict = {
+            "translation": [
+                {"zh": pair["chinese"], "en": pair["english"]} 
+                for pair in aligned_pairs
+            ]
+        }
+        
+        # Create the dataset
+        dataset = Dataset.from_dict(dataset_dict)
+        
+        # Save dataset statistics
+        print(f"Created dataset with {len(dataset)} translation pairs")
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save the dataset in Hugging Face Arrow format
+        dataset.save_to_disk(output_dir)
+        
+        # Also save a sample in JSON format for inspection
+        sample_size = min(100, len(aligned_pairs))
+        with open(os.path.join(output_dir, "sample.json"), "w", encoding="utf-8") as f:
+            json.dump(aligned_pairs[:sample_size], f, ensure_ascii=False, indent=2)
+        
+        return dataset
 
 def split_dataset(dataset, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, seed=42):
     """Split the dataset into train, validation, and test sets."""
@@ -478,6 +545,8 @@ def main():
                         help="Base name for the Hugging Face dataset repository")
     parser.add_argument("--private", action="store_true", default=True,
                         help="Whether to create a private repository")
+    parser.add_argument("--finetune_format", action="store_true",
+                        help="Create dataset in fine-tuning format with human/gpt message pairs")
     args = parser.parse_args()
     
     try:
@@ -533,24 +602,35 @@ def main():
                 raise ValueError("No valid paragraphs remained after language verification")
         
         # Create dataset directly from paragraphs
-        print("\nCreating Hugging Face dataset...")
-        dataset = create_huggingface_dataset(chinese_paragraphs, english_paragraphs, output_dir=args.output_dir)
-        
-        # Split dataset
-        print("Splitting dataset into train/validation/test sets...")
-        dataset_splits = split_dataset(dataset)
-        
-        # Save split datasets
-        for split_name, split_data in dataset_splits.items():
-            split_dir = os.path.join(args.output_dir, split_name)
-            split_data.save_to_disk(split_dir)
-            print(f"Saved {split_name} split with {len(split_data)} examples to {split_dir}")
+        print("\nCreating dataset...")
+        if args.finetune_format:
+            print("Using fine-tuning format with human/gpt message pairs")
+            result = create_huggingface_dataset(chinese_paragraphs, english_paragraphs, 
+                                                output_dir=args.output_dir,
+                                                finetune_format=True)
+            # No need to split the dataset as it's already split in the function
+        else:
+            dataset = create_huggingface_dataset(chinese_paragraphs, english_paragraphs, 
+                                              output_dir=args.output_dir)
+            
+            # Split dataset
+            print("Splitting dataset into train/validation/test sets...")
+            dataset_splits = split_dataset(dataset)
+            
+            # Save split datasets
+            for split_name, split_data in dataset_splits.items():
+                split_dir = os.path.join(args.output_dir, split_name)
+                split_data.save_to_disk(split_dir)
+                print(f"Saved {split_name} split with {len(split_data)} examples to {split_dir}")
             
         # Push to Hugging Face Hub if requested
         if args.push_to_hub:
             try:
-                repo_name = push_to_hub(args.output_dir, args.repo_name, args.private)
-                print(f"\nDataset is now available at: https://huggingface.co/datasets/{repo_name}")
+                if args.finetune_format:
+                    print("\nFor fine-tuning format, please use the upload_dataset.sh script to push to Hub")
+                else:
+                    repo_name = push_to_hub(args.output_dir, args.repo_name, args.private)
+                    print(f"\nDataset is now available at: https://huggingface.co/datasets/{repo_name}")
             except Exception as e:
                 print(f"\nFailed to push to Hugging Face Hub: {str(e)}")
                 print("The dataset was created locally but could not be pushed to the Hub")
