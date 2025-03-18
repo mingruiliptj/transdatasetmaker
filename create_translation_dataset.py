@@ -469,13 +469,13 @@ def main():
         
         # Split dataset
         print("Splitting dataset into train/validation/test sets...")
-        splits = split_dataset(dataset)
+        dataset_splits = split_dataset(dataset)
         
         # Save split datasets
-        for split_name, split_dataset in splits.items():
+        for split_name, split_data in dataset_splits.items():
             split_dir = os.path.join(args.output_dir, split_name)
-            split_dataset.save_to_disk(split_dir)
-            print(f"Saved {split_name} split with {len(split_dataset)} examples to {split_dir}")
+            split_data.save_to_disk(split_dir)
+            print(f"Saved {split_name} split with {len(split_data)} examples to {split_dir}")
             
     except Exception as e:
         print(f"\nError: {str(e)}")
