@@ -111,7 +111,7 @@ def preprocess_chinese_text(pages, to_simplified=False):
                 else:
                     processed_para = para
 
-                paragraphs.append({"text": para, "processed": processed_para})
+                paragraphs.append({"text": para, "processed": processed_para.replace("\n", "")})
     
     return paragraphs
 
@@ -130,7 +130,7 @@ def preprocess_english_text(pages):
                 # Tokenize into words
                 words = re.findall(r'\b\w+\b', para.lower())
                 processed_para = " ".join(words)
-                paragraphs.append({"text": para, "processed": processed_para})
+                paragraphs.append({"text": para, "processed": processed_para.replace("\n", "")})
     
     return paragraphs
 
