@@ -83,9 +83,29 @@ from huggingface_hub import HfApi, create_repo, whoami
 import os
 import sys
 import time
+import json
 
 dataset_dir = "$DATASET_DIR"
 repo_name = "$DATASET_NAME"
+
+def convert_to_finetune_format(dataset):
+    """Convert translation dataset to the finetune format with human/gpt message pairs."""
+    finetune_data = []
+    
+    for example in dataset:
+        # Get the Chinese and English text
+        chinese_text = example['translation']['zh']
+        english_text = example['translation']['en']
+        
+        # Create the message pairs
+        message_pair = [
+            {"from": "human", "value": f"translate following chinese into english -- {chinese_text}"},
+            {"from": "gpt", "value": f"{english_text}"}
+        ]
+        
+        finetune_data.append(message_pair)
+    
+    return finetune_data
 
 try:
     # Get user information
@@ -117,31 +137,121 @@ try:
     # Initialize API
     api = HfApi()
     
-    # Upload each split
+    # Convert and upload each split
     splits = ['train', 'validation', 'test']
     for split in splits:
         split_path = os.path.join(dataset_dir, split)
         if os.path.exists(split_path):
+            # Load the dataset
             split_dataset = load_from_disk(split_path)
-            split_dataset.push_to_hub(
-                full_repo_name,
-                split=split,
-                private=False
+            print(f"Loaded {split} split with {len(split_dataset)} examples")
+            
+            # Convert to finetune format
+            finetune_data = convert_to_finetune_format(split_dataset)
+            print(f"Converted {len(finetune_data)} examples to finetune format")
+            
+            # Save to a temporary JSON file
+            temp_json_path = f"{split}_finetune.json"
+            with open(temp_json_path, 'w', encoding='utf-8') as f:
+                json.dump(finetune_data, f, ensure_ascii=False, indent=2)
+            
+            # Upload the JSON file
+            api.upload_file(
+                path_or_fileobj=temp_json_path,
+                path_in_repo=f"{split}.json",
+                repo_id=full_repo_name,
+                repo_type="dataset"
             )
-            print(f"Pushed {split} split with {len(split_dataset)} examples")
+            print(f"Pushed {split}.json with {len(finetune_data)} examples")
+            
+            # Clean up the temporary file
+            os.remove(temp_json_path)
     
     # Upload sample.json if it exists
     sample_path = os.path.join(dataset_dir, "sample.json")
     if os.path.exists(sample_path):
+        # Read the original sample file
+        with open(sample_path, 'r', encoding='utf-8') as f:
+            sample_data = json.load(f)
+        
+        # Convert to finetune format
+        finetune_sample = []
+        for item in sample_data:
+            message_pair = [
+                {"from": "human", "value": f"translate following chinese into english -- {item['chinese']}"},
+                {"from": "gpt", "value": f"{item['english']}"}
+            ]
+            finetune_sample.append(message_pair)
+        
+        # Save to temporary file
+        temp_sample_path = "finetune_sample.json"
+        with open(temp_sample_path, 'w', encoding='utf-8') as f:
+            json.dump(finetune_sample, f, ensure_ascii=False, indent=2)
+        
+        # Upload the converted sample
         api.upload_file(
-            path_or_fileobj=sample_path,
+            path_or_fileobj=temp_sample_path,
             path_in_repo="sample.json",
             repo_id=full_repo_name,
             repo_type="dataset"
         )
-        print("Pushed sample.json file")
+        print("Pushed sample.json file in finetune format")
+        
+        # Clean up
+        os.remove(temp_sample_path)
+    
+    # Create a README file explaining the dataset format
+    readme_content = f"""# {repo_name}
+
+This dataset contains Chinese to English translation pairs formatted for fine-tuning LLMs.
+
+## Format
+
+Each example is formatted as a conversation pair:
+
+```json
+[
+  {{
+    "from": "human",
+    "value": "translate following chinese into english -- [Chinese Text]"
+  }},
+  {{
+    "from": "gpt",
+    "value": "[English Translation]"
+  }}
+]
+```
+
+## Statistics
+
+The dataset contains the following splits:
+"""
+    
+    # Add statistics for each split
+    for split in splits:
+        split_path = os.path.join(dataset_dir, split)
+        if os.path.exists(split_path):
+            split_dataset = load_from_disk(split_path)
+            readme_content += f"- {split}: {len(split_dataset)} examples\\n"
+    
+    # Save and upload README
+    readme_path = "README.md"
+    with open(readme_path, 'w', encoding='utf-8') as f:
+        f.write(readme_content)
+    
+    api.upload_file(
+        path_or_fileobj=readme_path,
+        path_in_repo="README.md",
+        repo_id=full_repo_name,
+        repo_type="dataset"
+    )
+    print("Created and pushed README.md")
+    
+    # Clean up
+    os.remove(readme_path)
     
     print(f"\nDataset successfully uploaded to: https://huggingface.co/datasets/{full_repo_name}")
+    print("The dataset is formatted for fine-tuning with human/gpt message pairs")
     
 except Exception as e:
     print(f"Error: {str(e)}", file=sys.stderr)
@@ -161,6 +271,7 @@ if [ $RESULT -eq 0 ]; then
     # Get username for the URL
     USERNAME=$(huggingface-cli whoami)
     echo "Dataset URL: https://huggingface.co/datasets/${USERNAME}/${DATASET_NAME}"
+    echo "The dataset is now formatted for fine-tuning with human/gpt message pairs"
 else
     echo "Upload failed. Please check the error messages above."
     exit 1
