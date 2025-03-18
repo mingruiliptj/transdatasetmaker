@@ -410,6 +410,101 @@ def split_dataset(dataset, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, seed=
         "test": test_dataset
     }
 
+def generate_paragraph_report(chinese_paragraphs, english_paragraphs, output_dir):
+    """Generate an HTML report showing how texts are split into paragraphs.
+    
+    Args:
+        chinese_paragraphs: List of Chinese paragraph dictionaries
+        english_paragraphs: List of English paragraph dictionaries
+        output_dir: Directory to save the report
+    """
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .container { display: flex; }
+            .column { flex: 1; padding: 10px; }
+            .paragraph { 
+                margin-bottom: 20px; 
+                padding: 10px; 
+                border: 1px solid #ccc;
+                border-radius: 4px;
+            }
+            .paragraph-number {
+                font-weight: bold;
+                color: #666;
+                margin-bottom: 5px;
+            }
+            .text {
+                white-space: pre-wrap;
+                word-wrap: break-word;
+            }
+            .processed {
+                margin-top: 5px;
+                font-size: 0.9em;
+                color: #666;
+                border-top: 1px dashed #ccc;
+                padding-top: 5px;
+            }
+            h2 { color: #333; }
+        </style>
+    </head>
+    <body>
+        <h1>Paragraph Split Report</h1>
+        <div class="container">
+            <div class="column">
+                <h2>Chinese Text (${len(chinese_paragraphs)} paragraphs)</h2>
+                ${chinese_paragraphs_html}
+            </div>
+            <div class="column">
+                <h2>English Text (${len(english_paragraphs)} paragraphs)</h2>
+                ${english_paragraphs_html}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Generate HTML for Chinese paragraphs
+    chinese_html = []
+    for i, para in enumerate(chinese_paragraphs):
+        chinese_html.append(f"""
+        <div class="paragraph">
+            <div class="paragraph-number">Paragraph {i+1}</div>
+            <div class="text">{para['text']}</div>
+            <div class="processed">Processed: {para['processed']}</div>
+        </div>
+        """)
+    
+    # Generate HTML for English paragraphs
+    english_html = []
+    for i, para in enumerate(english_paragraphs):
+        english_html.append(f"""
+        <div class="paragraph">
+            <div class="paragraph-number">Paragraph {i+1}</div>
+            <div class="text">{para['text']}</div>
+            <div class="processed">Processed: {para['processed']}</div>
+        </div>
+        """)
+    
+    # Replace placeholders in template
+    html_content = html_content.replace("${len(chinese_paragraphs)}", str(len(chinese_paragraphs)))
+    html_content = html_content.replace("${len(english_paragraphs)}", str(len(english_paragraphs)))
+    html_content = html_content.replace("${chinese_paragraphs_html}", "\n".join(chinese_html))
+    html_content = html_content.replace("${english_paragraphs_html}", "\n".join(english_html))
+    
+    # Save the report
+    report_path = os.path.join(output_dir, "paragraph_split_report.html")
+    os.makedirs(output_dir, exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    
+    print(f"\nGenerated paragraph split report at: {report_path}")
+    return report_path
+
 def main():
     parser = argparse.ArgumentParser(description="Create translation dataset from Chinese and English text files")
     parser.add_argument("--chinese_text", required=True, help="Path to Chinese text file")
@@ -428,29 +523,46 @@ def main():
     try:
         # Extract text from text files
         print("Reading text files...")
-        chinese_paragraphs = read_text_file(args.chinese_text, args.max_lines)
-        english_paragraphs = read_text_file(args.english_text, args.max_lines)
+        chinese_text = read_text_file(args.chinese_text, args.max_lines)
+        english_text = read_text_file(args.english_text, args.max_lines)
         
-        if not chinese_paragraphs or not english_paragraphs:
+        if not chinese_text or not english_text:
             raise ValueError("No text could be extracted from one or both text files")
         
         # Preprocess text and segment into paragraphs
         print("Preprocessing Chinese text...")
         if args.to_simplified:
             print("Converting traditional Chinese to simplified Chinese...")
-        chinese_paragraphs = preprocess_chinese_text(chinese_paragraphs, to_simplified=args.to_simplified)
+        chinese_paragraphs = preprocess_chinese_text(chinese_text, to_simplified=args.to_simplified)
         print(f"Extracted {len(chinese_paragraphs)} Chinese paragraphs")
         
         print("Preprocessing English text...")
-        english_paragraphs = preprocess_english_text(english_paragraphs)
+        english_paragraphs = preprocess_english_text(english_text)
         print(f"Extracted {len(english_paragraphs)} English paragraphs")
+        
+        # Generate paragraph split report before language verification
+        print("\nGenerating paragraph split report...")
+        report_path = generate_paragraph_report(chinese_paragraphs, english_paragraphs, args.output_dir)
+        print(f"Please check the report at {report_path} to verify paragraph splits")
         
         if not chinese_paragraphs or not english_paragraphs:
             raise ValueError("No valid paragraphs could be extracted from one or both text files")
         
+        # Print some statistics about the paragraphs
+        print("\nParagraph Statistics:")
+        print(f"Chinese paragraphs: {len(chinese_paragraphs)}")
+        print(f"English paragraphs: {len(english_paragraphs)}")
+        print(f"Ratio (Chinese/English): {len(chinese_paragraphs)/len(english_paragraphs):.2f}")
+        
+        # Print sample of first few paragraphs
+        print("\nFirst Chinese paragraph:")
+        print(chinese_paragraphs[0]['text'][:200] + "..." if len(chinese_paragraphs) > 0 else "None")
+        print("\nFirst English paragraph:")
+        print(english_paragraphs[0]['text'][:200] + "..." if len(english_paragraphs) > 0 else "None")
+        
         # Optionally verify language
         if args.verify_language:
-            print("Verifying language of paragraphs...")
+            print("\nVerifying language of paragraphs...")
             chinese_paragraphs = verify_language(chinese_paragraphs, 'zh')
             print(f"{len(chinese_paragraphs)} Chinese paragraphs after language verification")
             
@@ -461,7 +573,7 @@ def main():
                 raise ValueError("No valid paragraphs remained after language verification")
         
         # Align paragraphs
-        print(f"Aligning paragraphs using {args.alignment_method} method...")
+        print(f"\nAligning paragraphs using {args.alignment_method} method...")
         aligned_pairs = align_paragraphs(chinese_paragraphs, english_paragraphs, method=args.alignment_method)
         print(f"Created {len(aligned_pairs)} aligned paragraph pairs")
         
@@ -475,7 +587,7 @@ def main():
                 raise ValueError(f"No pairs remained after filtering with min_score={args.min_score}")
         
         # Create dataset
-        print("Creating Hugging Face dataset...")
+        print("\nCreating Hugging Face dataset...")
         dataset = create_huggingface_dataset(aligned_pairs, output_dir=args.output_dir)
         
         # Split dataset
@@ -492,9 +604,10 @@ def main():
         print(f"\nError: {str(e)}")
         print("\nPlease check that:")
         print("1. Both text files exist and are readable")
-        print("2. Text files contain extractable text (not scanned images)")
+        print("2. Text files contain extractable text")
         print("3. Text files contain sufficient non-empty lines")
         print("4. Text is properly encoded and contains actual content")
+        print("5. Review the paragraph split report to see how the text was divided")
         sys.exit(1)
 
 if __name__ == "__main__":
