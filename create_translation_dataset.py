@@ -14,6 +14,7 @@ import numpy as np
 from langdetect import detect, DetectorFactory
 from sentence_transformers import SentenceTransformer
 import opencc
+import sys
 
 # Set seed for language detection
 DetectorFactory.seed = 0
@@ -33,19 +34,30 @@ def extract_text_from_pdf(pdf_path, max_pages=None):
         pdf_path: Path to the PDF file
         max_pages: Maximum number of pages to process. If None, process all pages.
     """
+    if not os.path.exists(pdf_path):
+        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+        
     text_by_page = []
     
     with pdfplumber.open(pdf_path) as pdf:
         # Get the pages to process
         total_pages = len(pdf.pages)
+        if total_pages == 0:
+            raise ValueError(f"PDF file is empty: {pdf_path}")
+            
         pages_to_process = min(max_pages, total_pages) if max_pages else total_pages
         
         print(f"Processing {pages_to_process} pages out of {total_pages} total pages")
         for page_num in tqdm(range(pages_to_process), desc=f"Extracting text from {os.path.basename(pdf_path)}"):
             text = pdf.pages[page_num].extract_text()
-            if text:
+            # Only append non-empty pages
+            if text and text.strip():
                 text_by_page.append(text)
     
+    if not text_by_page:
+        raise ValueError(f"No text could be extracted from PDF: {pdf_path}")
+    
+    print(f"Successfully extracted text from {len(text_by_page)} non-empty pages")
     return text_by_page
 
 def preprocess_chinese_text(pages, to_simplified=False):
@@ -132,6 +144,10 @@ def align_paragraphs(chinese_paragraphs, english_paragraphs, method="tfidf_simil
     - tfidf_similarity: Alignment based on TF-IDF vector similarity
     - sentence_transformer: Alignment based on multilingual sentence embeddings
     """
+    # Validate input
+    if not chinese_paragraphs or not english_paragraphs:
+        raise ValueError("Both Chinese and English paragraphs must not be empty")
+    
     aligned_pairs = []
     
     if method == "length_based":
@@ -167,59 +183,68 @@ def align_paragraphs(chinese_paragraphs, english_paragraphs, method="tfidf_simil
         # Create TF-IDF vectors for processed paragraphs
         all_processed_texts = [p["processed"] for p in chinese_paragraphs + english_paragraphs]
         
-        # Increase min_df to filter out rare terms that might just be noise
-        # and max_df to filter out terms that appear in too many documents
-        vectorizer = TfidfVectorizer(min_df=2, max_df=0.9, ngram_range=(1, 2))
-        tfidf_matrix = vectorizer.fit_transform(all_processed_texts)
-        
-        # Extract Chinese and English parts of the matrix
-        zh_vectors = tfidf_matrix[:len(chinese_paragraphs)]
-        en_vectors = tfidf_matrix[len(chinese_paragraphs):]
-        
-        # Compute similarity between all Chinese and English paragraphs
-        print("Computing similarity matrix...")
-        similarity_matrix = cosine_similarity(zh_vectors, en_vectors)
-        
-        # For each Chinese paragraph, find the most similar English paragraph
-        used_en_indices = set()
-        
-        # First pass: High confidence matches
-        for zh_idx, similarities in enumerate(similarity_matrix):
-            en_idx = np.argmax(similarities)
-            score = similarities[en_idx]
+        try:
+            # Increase min_df to filter out rare terms that might just be noise
+            # and max_df to filter out terms that appear in too many documents
+            vectorizer = TfidfVectorizer(min_df=1, max_df=0.95, ngram_range=(1, 2))
+            tfidf_matrix = vectorizer.fit_transform(all_processed_texts)
             
-            # Only keep alignments with high similarity
-            if score > 0.15 and en_idx not in used_en_indices:  # Higher threshold for first pass
-                aligned_pairs.append({
-                    "chinese": chinese_paragraphs[zh_idx]["text"],
-                    "english": english_paragraphs[en_idx]["text"],
-                    "score": float(score)
-                })
-                used_en_indices.add(en_idx)
-        
-        # Second pass: For Chinese paragraphs without a match, use a lower threshold
-        for zh_idx, similarities in enumerate(similarity_matrix):
-            # Skip if this Chinese paragraph already has a match
-            if any(pair["chinese"] == chinese_paragraphs[zh_idx]["text"] for pair in aligned_pairs):
-                continue
-                
-            # Find best unused English paragraph
-            sorted_indices = np.argsort(-similarities)  # Sort in descending order
+            # Extract Chinese and English parts of the matrix
+            zh_vectors = tfidf_matrix[:len(chinese_paragraphs)]
+            en_vectors = tfidf_matrix[len(chinese_paragraphs):]
             
-            for en_idx in sorted_indices:
+            # Compute similarity between all Chinese and English paragraphs
+            print("Computing similarity matrix...")
+            similarity_matrix = cosine_similarity(zh_vectors, en_vectors)
+            
+            # For each Chinese paragraph, find the most similar English paragraph
+            used_en_indices = set()
+            
+            # First pass: High confidence matches
+            for zh_idx, similarities in enumerate(similarity_matrix):
+                en_idx = np.argmax(similarities)
                 score = similarities[en_idx]
                 
-                # Use a lower threshold but still ensure some similarity
-                if score > 0.08 and en_idx not in used_en_indices:
+                # Only keep alignments with high similarity
+                if score > 0.15 and en_idx not in used_en_indices:  # Higher threshold for first pass
                     aligned_pairs.append({
                         "chinese": chinese_paragraphs[zh_idx]["text"],
                         "english": english_paragraphs[en_idx]["text"],
                         "score": float(score)
                     })
                     used_en_indices.add(en_idx)
-                    break
+            
+            # Second pass: For Chinese paragraphs without a match, use a lower threshold
+            for zh_idx, similarities in enumerate(similarity_matrix):
+                # Skip if this Chinese paragraph already has a match
+                if any(pair["chinese"] == chinese_paragraphs[zh_idx]["text"] for pair in aligned_pairs):
+                    continue
+                    
+                # Find best unused English paragraph
+                sorted_indices = np.argsort(-similarities)  # Sort in descending order
+                
+                for en_idx in sorted_indices:
+                    score = similarities[en_idx]
+                    
+                    # Use a lower threshold but still ensure some similarity
+                    if score > 0.08 and en_idx not in used_en_indices:
+                        aligned_pairs.append({
+                            "chinese": chinese_paragraphs[zh_idx]["text"],
+                            "english": english_paragraphs[en_idx]["text"],
+                            "score": float(score)
+                        })
+                        used_en_indices.add(en_idx)
+                        break
+                        
+        except ValueError as e:
+            print(f"Warning: TF-IDF alignment failed ({str(e)}), falling back to length-based alignment")
+            return align_paragraphs(chinese_paragraphs, english_paragraphs, method="length_based")
     
     elif method == "sentence_transformer":
+        if not chinese_paragraphs or not english_paragraphs:
+            print("Warning: Empty paragraphs detected, falling back to length-based alignment")
+            return align_paragraphs(chinese_paragraphs, english_paragraphs, method="length_based")
+            
         print("Using SentenceTransformer for paragraph alignment")
         
         # Load a multilingual sentence transformer model
@@ -278,6 +303,9 @@ def align_paragraphs(chinese_paragraphs, english_paragraphs, method="tfidf_simil
     # Sort the aligned pairs by score if available
     if aligned_pairs and "score" in aligned_pairs[0]:
         aligned_pairs.sort(key=lambda x: x["score"], reverse=True)
+    
+    if not aligned_pairs:
+        raise ValueError("No paragraph pairs could be aligned. Please check your input PDFs.")
     
     return aligned_pairs
 
@@ -358,55 +386,77 @@ def main():
                         help="Convert traditional Chinese to simplified Chinese")
     args = parser.parse_args()
     
-    # Extract text from PDFs
-    print("Extracting text from PDFs...")
-    chinese_pages = extract_text_from_pdf(args.chinese_pdf, args.max_pages)
-    english_pages = extract_text_from_pdf(args.english_pdf, args.max_pages)
-    
-    # Preprocess text and segment into paragraphs
-    print("Preprocessing Chinese text...")
-    if args.to_simplified:
-        print("Converting traditional Chinese to simplified Chinese...")
-    chinese_paragraphs = preprocess_chinese_text(chinese_pages, to_simplified=args.to_simplified)
-    print(f"Extracted {len(chinese_paragraphs)} Chinese paragraphs")
-    
-    print("Preprocessing English text...")
-    english_paragraphs = preprocess_english_text(english_pages)
-    print(f"Extracted {len(english_paragraphs)} English paragraphs")
-    
-    # Optionally verify language
-    if args.verify_language:
-        print("Verifying language of paragraphs...")
-        chinese_paragraphs = verify_language(chinese_paragraphs, 'zh')
-        print(f"{len(chinese_paragraphs)} Chinese paragraphs after language verification")
+    try:
+        # Extract text from PDFs
+        print("Extracting text from PDFs...")
+        chinese_pages = extract_text_from_pdf(args.chinese_pdf, args.max_pages)
+        english_pages = extract_text_from_pdf(args.english_pdf, args.max_pages)
         
-        english_paragraphs = verify_language(english_paragraphs, 'en')
-        print(f"{len(english_paragraphs)} English paragraphs after language verification")
-    
-    # Align paragraphs
-    print(f"Aligning paragraphs using {args.alignment_method} method...")
-    aligned_pairs = align_paragraphs(chinese_paragraphs, english_paragraphs, method=args.alignment_method)
-    print(f"Created {len(aligned_pairs)} aligned paragraph pairs")
-    
-    # Filter by score if applicable
-    if args.alignment_method in ["tfidf_similarity", "sentence_transformer"] and args.min_score > 0:
-        original_count = len(aligned_pairs)
-        aligned_pairs = [pair for pair in aligned_pairs if pair.get("score", 1.0) >= args.min_score]
-        print(f"Filtered down to {len(aligned_pairs)} pairs with score >= {args.min_score} (removed {original_count - len(aligned_pairs)} pairs)")
-    
-    # Create dataset
-    print("Creating Hugging Face dataset...")
-    dataset = create_huggingface_dataset(aligned_pairs, output_dir=args.output_dir)
-    
-    # Split dataset
-    print("Splitting dataset into train/validation/test sets...")
-    splits = split_dataset(dataset)
-    
-    # Save split datasets
-    for split_name, split_dataset in splits.items():
-        split_dir = os.path.join(args.output_dir, split_name)
-        split_dataset.save_to_disk(split_dir)
-        print(f"Saved {split_name} split with {len(split_dataset)} examples to {split_dir}")
+        if not chinese_pages or not english_pages:
+            raise ValueError("No text could be extracted from one or both PDFs")
+        
+        # Preprocess text and segment into paragraphs
+        print("Preprocessing Chinese text...")
+        if args.to_simplified:
+            print("Converting traditional Chinese to simplified Chinese...")
+        chinese_paragraphs = preprocess_chinese_text(chinese_pages, to_simplified=args.to_simplified)
+        print(f"Extracted {len(chinese_paragraphs)} Chinese paragraphs")
+        
+        print("Preprocessing English text...")
+        english_paragraphs = preprocess_english_text(english_pages)
+        print(f"Extracted {len(english_paragraphs)} English paragraphs")
+        
+        if not chinese_paragraphs or not english_paragraphs:
+            raise ValueError("No valid paragraphs could be extracted from one or both PDFs")
+        
+        # Optionally verify language
+        if args.verify_language:
+            print("Verifying language of paragraphs...")
+            chinese_paragraphs = verify_language(chinese_paragraphs, 'zh')
+            print(f"{len(chinese_paragraphs)} Chinese paragraphs after language verification")
+            
+            english_paragraphs = verify_language(english_paragraphs, 'en')
+            print(f"{len(english_paragraphs)} English paragraphs after language verification")
+            
+            if not chinese_paragraphs or not english_paragraphs:
+                raise ValueError("No valid paragraphs remained after language verification")
+        
+        # Align paragraphs
+        print(f"Aligning paragraphs using {args.alignment_method} method...")
+        aligned_pairs = align_paragraphs(chinese_paragraphs, english_paragraphs, method=args.alignment_method)
+        print(f"Created {len(aligned_pairs)} aligned paragraph pairs")
+        
+        # Filter by score if applicable
+        if args.alignment_method in ["tfidf_similarity", "sentence_transformer"] and args.min_score > 0:
+            original_count = len(aligned_pairs)
+            aligned_pairs = [pair for pair in aligned_pairs if pair.get("score", 1.0) >= args.min_score]
+            print(f"Filtered down to {len(aligned_pairs)} pairs with score >= {args.min_score} (removed {original_count - len(aligned_pairs)} pairs)")
+            
+            if not aligned_pairs:
+                raise ValueError(f"No pairs remained after filtering with min_score={args.min_score}")
+        
+        # Create dataset
+        print("Creating Hugging Face dataset...")
+        dataset = create_huggingface_dataset(aligned_pairs, output_dir=args.output_dir)
+        
+        # Split dataset
+        print("Splitting dataset into train/validation/test sets...")
+        splits = split_dataset(dataset)
+        
+        # Save split datasets
+        for split_name, split_dataset in splits.items():
+            split_dir = os.path.join(args.output_dir, split_name)
+            split_dataset.save_to_disk(split_dir)
+            print(f"Saved {split_name} split with {len(split_dataset)} examples to {split_dir}")
+            
+    except Exception as e:
+        print(f"\nError: {str(e)}")
+        print("\nPlease check that:")
+        print("1. Both PDF files exist and are readable")
+        print("2. PDFs contain extractable text (not scanned images)")
+        print("3. PDFs contain sufficient non-empty pages")
+        print("4. Text is properly encoded and contains actual content")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main() 
