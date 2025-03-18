@@ -4,7 +4,9 @@ import re
 import json
 import jieba
 import nltk
-from datasets import Dataset
+from datasets import Dataset, load_from_disk
+from huggingface_hub import HfApi, create_repo
+from datetime import datetime
 from tqdm import tqdm
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -399,6 +401,67 @@ def generate_paragraph_report(chinese_paragraphs, english_paragraphs, output_dir
     print(f"\nGenerated paragraph split report at: {report_path}")
     return report_path
 
+def push_to_hub(dataset_dir, repo_name, private=True):
+    """Push the dataset to Hugging Face Hub.
+    
+    Args:
+        dataset_dir: Directory containing the dataset
+        repo_name: Base name for the repository
+        private: Whether to create a private repository
+    """
+    # Generate a unique repository name with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    full_repo_name = f"{repo_name}_{timestamp}"
+    
+    print(f"\nPushing dataset to Hugging Face Hub as '{full_repo_name}'...")
+    
+    try:
+        # Initialize Hugging Face API
+        api = HfApi()
+        
+        # Create the repository
+        repo_url = create_repo(
+            repo_id=full_repo_name,
+            repo_type="dataset",
+            private=private,
+            exist_ok=False
+        )
+        print(f"Created repository: {repo_url}")
+        
+        # Load and push each split
+        splits = ['train', 'validation', 'test']
+        for split in splits:
+            split_path = os.path.join(dataset_dir, split)
+            if os.path.exists(split_path):
+                # Load the split
+                split_dataset = load_from_disk(split_path)
+                
+                # Push to hub
+                split_dataset.push_to_hub(
+                    full_repo_name,
+                    split=split,
+                    private=private
+                )
+                print(f"Pushed {split} split with {len(split_dataset)} examples")
+        
+        # Also push the sample.json file
+        sample_path = os.path.join(dataset_dir, "sample.json")
+        if os.path.exists(sample_path):
+            api.upload_file(
+                path_or_fileobj=sample_path,
+                path_in_repo="sample.json",
+                repo_id=full_repo_name,
+                repo_type="dataset"
+            )
+            print("Pushed sample.json file")
+            
+        print(f"\nDataset successfully pushed to: https://huggingface.co/datasets/{full_repo_name}")
+        return full_repo_name
+        
+    except Exception as e:
+        print(f"Error pushing to Hugging Face Hub: {str(e)}")
+        raise
+
 def main():
     parser = argparse.ArgumentParser(description="Create translation dataset from Chinese and English text files")
     parser.add_argument("--chinese_text", required=True, help="Path to Chinese text file")
@@ -409,6 +472,12 @@ def main():
                         help="Maximum number of lines to process from each text file. If not specified, process all lines.")
     parser.add_argument("--to_simplified", action="store_true",
                         help="Convert traditional Chinese to simplified Chinese")
+    parser.add_argument("--push_to_hub", action="store_true",
+                        help="Push the dataset to Hugging Face Hub")
+    parser.add_argument("--repo_name", default="zh_en_translation",
+                        help="Base name for the Hugging Face dataset repository")
+    parser.add_argument("--private", action="store_true", default=True,
+                        help="Whether to create a private repository")
     args = parser.parse_args()
     
     try:
@@ -477,6 +546,16 @@ def main():
             split_data.save_to_disk(split_dir)
             print(f"Saved {split_name} split with {len(split_data)} examples to {split_dir}")
             
+        # Push to Hugging Face Hub if requested
+        if args.push_to_hub:
+            try:
+                repo_name = push_to_hub(args.output_dir, args.repo_name, args.private)
+                print(f"\nDataset is now available at: https://huggingface.co/datasets/{repo_name}")
+            except Exception as e:
+                print(f"\nFailed to push to Hugging Face Hub: {str(e)}")
+                print("The dataset was created locally but could not be pushed to the Hub")
+                print("Please check your Hugging Face credentials and internet connection")
+        
     except Exception as e:
         print(f"\nError: {str(e)}")
         print("\nPlease check that:")
