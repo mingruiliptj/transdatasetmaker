@@ -2,7 +2,7 @@
 
 # Help function
 show_help() {
-    echo "Usage: $0 [options] <dataset_directory>"
+    echo "Usage: $0 [options] <dataset_directory> "
     echo
     echo "Upload a dataset to Hugging Face Hub with automatic versioning"
     echo
@@ -17,8 +17,8 @@ show_help() {
 }
 
 # Default values
-DATASET_NAME="zh_en_translation"
-PRIVATE="--private"
+DATASET_NAME="dharma_cn_en_sodargye"
+PRIVATE="--public"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
