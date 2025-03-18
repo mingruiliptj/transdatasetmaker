@@ -79,22 +79,43 @@ echo "Privacy setting: public"
 TMP_SCRIPT=$(mktemp)
 cat > "$TMP_SCRIPT" << EOL
 from datasets import load_from_disk
-from huggingface_hub import HfApi, create_repo
+from huggingface_hub import HfApi, create_repo, whoami
 import os
 import sys
+import time
 
 dataset_dir = "$DATASET_DIR"
 repo_name = "$DATASET_NAME"
 
 try:
+    # Get user information
+    user_info = whoami()
+    namespace = user_info.get("name")
+    if not namespace:
+        raise ValueError("Could not determine your Hugging Face username. Please make sure you are logged in.")
+    
+    # Create full repository name with namespace
+    full_repo_name = f"{namespace}/{repo_name}"
+    print(f"Using repository name: {full_repo_name}")
+    
     # Create the repository
-    repo_url = create_repo(
-        repo_id=repo_name,
-        repo_type="dataset",
-        private=False,
-        exist_ok=True
-    )
-    print(f"Created repository: {repo_url}")
+    try:
+        repo_url = create_repo(
+            repo_id=full_repo_name,
+            repo_type="dataset",
+            private=False,
+            exist_ok=True
+        )
+        print(f"Repository ready at: {repo_url}")
+    except Exception as e:
+        print(f"Error creating repository: {str(e)}")
+        sys.exit(1)
+    
+    # Wait a moment for the repository to be fully created
+    time.sleep(2)
+    
+    # Initialize API
+    api = HfApi()
     
     # Upload each split
     splits = ['train', 'validation', 'test']
@@ -103,7 +124,7 @@ try:
         if os.path.exists(split_path):
             split_dataset = load_from_disk(split_path)
             split_dataset.push_to_hub(
-                repo_name,
+                full_repo_name,
                 split=split,
                 private=False
             )
@@ -112,16 +133,15 @@ try:
     # Upload sample.json if it exists
     sample_path = os.path.join(dataset_dir, "sample.json")
     if os.path.exists(sample_path):
-        api = HfApi()
         api.upload_file(
             path_or_fileobj=sample_path,
             path_in_repo="sample.json",
-            repo_id=repo_name,
+            repo_id=full_repo_name,
             repo_type="dataset"
         )
         print("Pushed sample.json file")
     
-    print(f"\nDataset successfully uploaded to: https://huggingface.co/datasets/{repo_name}")
+    print(f"\nDataset successfully uploaded to: https://huggingface.co/datasets/{full_repo_name}")
     
 except Exception as e:
     print(f"Error: {str(e)}", file=sys.stderr)
@@ -138,7 +158,9 @@ rm "$TMP_SCRIPT"
 # Check if upload was successful
 if [ $RESULT -eq 0 ]; then
     echo "Upload completed successfully!"
-    echo "Dataset URL: https://huggingface.co/datasets/${DATASET_NAME}"
+    # Get username for the URL
+    USERNAME=$(huggingface-cli whoami)
+    echo "Dataset URL: https://huggingface.co/datasets/${USERNAME}/${DATASET_NAME}"
 else
     echo "Upload failed. Please check the error messages above."
     exit 1
