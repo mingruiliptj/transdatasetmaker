@@ -105,8 +105,12 @@ def preprocess_chinese_text(pages, to_simplified=False):
             para = para.strip()
             if para:
                 # Use jieba for word segmentation
-                seg_list = jieba.cut(para)
-                processed_para = " ".join(seg_list)
+                if len(para) > 20:
+                    seg_list = jieba.cut(para)
+                    processed_para = " ".join(seg_list)
+                else:
+                    processed_para = para
+
                 paragraphs.append({"text": para, "processed": processed_para})
     
     return paragraphs
