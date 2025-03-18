@@ -95,14 +95,14 @@ import sys
 
 dataset_dir = "$DATASET_DIR"
 repo_name = "$FULL_DATASET_NAME"
-private = ${PRIVATE:+True}
+private = $([[ -n "$PRIVATE" ]] && echo "True" || echo "False")
 
 try:
     # Create the repository
     repo_url = create_repo(
         repo_id=repo_name,
         repo_type="dataset",
-        private=${PRIVATE:+True},
+        private=private,
         exist_ok=False
     )
     print(f"Created repository: {repo_url}")
@@ -116,7 +116,7 @@ try:
             split_dataset.push_to_hub(
                 repo_name,
                 split=split,
-                private=${PRIVATE:+True}
+                private=private
             )
             print(f"Pushed {split} split with {len(split_dataset)} examples")
     
