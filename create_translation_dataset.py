@@ -13,12 +13,18 @@ from nltk.tokenize import sent_tokenize
 import numpy as np
 from langdetect import detect, DetectorFactory
 from sentence_transformers import SentenceTransformer
+import opencc
 
 # Set seed for language detection
 DetectorFactory.seed = 0
 
 # Download necessary NLTK data
 nltk.download('punkt', quiet=True)
+
+def convert_to_simplified(text):
+    """Convert traditional Chinese text to simplified Chinese."""
+    converter = opencc.OpenCC('t2s')  # Traditional to Simplified
+    return converter.convert(text)
 
 def extract_text_from_pdf(pdf_path, max_pages=None):
     """Extract text from a PDF file using pdfplumber.
@@ -42,11 +48,23 @@ def extract_text_from_pdf(pdf_path, max_pages=None):
     
     return text_by_page
 
-def preprocess_chinese_text(pages):
-    """Preprocess Chinese text and segment into paragraphs."""
+def preprocess_chinese_text(pages, to_simplified=False):
+    """Preprocess Chinese text and segment into paragraphs.
+    
+    Args:
+        pages: List of text pages
+        to_simplified: Whether to convert traditional Chinese to simplified Chinese
+    """
     paragraphs = []
     
+    # Initialize converter if needed
+    converter = opencc.OpenCC('t2s') if to_simplified else None
+    
     for page in pages:
+        # Convert to simplified Chinese if requested
+        if to_simplified:
+            page = converter.convert(page)
+            
         # Split by double newlines to get paragraphs
         page_paragraphs = re.split(r'\n\s*\n', page)
         
@@ -336,6 +354,8 @@ def main():
     parser.add_argument("--min_score", type=float, default=0.08, help="Minimum similarity score for alignment")
     parser.add_argument("--max_pages", type=int, default=None, 
                         help="Maximum number of pages to process from each PDF. If not specified, process all pages.")
+    parser.add_argument("--to_simplified", action="store_true",
+                        help="Convert traditional Chinese to simplified Chinese")
     args = parser.parse_args()
     
     # Extract text from PDFs
@@ -345,7 +365,9 @@ def main():
     
     # Preprocess text and segment into paragraphs
     print("Preprocessing Chinese text...")
-    chinese_paragraphs = preprocess_chinese_text(chinese_pages)
+    if args.to_simplified:
+        print("Converting traditional Chinese to simplified Chinese...")
+    chinese_paragraphs = preprocess_chinese_text(chinese_pages, to_simplified=args.to_simplified)
     print(f"Extracted {len(chinese_paragraphs)} Chinese paragraphs")
     
     print("Preprocessing English text...")
