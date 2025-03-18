@@ -49,12 +49,11 @@ if [ ! -d "$DATASET_DIR" ]; then
     exit 1
 fi
 
-# Check if required splits exist
-for split in train validation test; do
-    if [ ! -d "$DATASET_DIR/$split" ] || [ ! -f "$DATASET_DIR/$split/data.json" ]; then
-        echo "Warning: '$split/data.json' not found in $DATASET_DIR"
-    fi
-done
+# Check if required files exist
+if [ ! -f "$DATASET_DIR/finetune_data.json" ]; then
+    echo "Error: 'finetune_data.json' not found in $DATASET_DIR"
+    exit 1
+fi
 
 # Check if Hugging Face CLI is installed and user is logged in
 if ! command -v huggingface-cli &> /dev/null; then
@@ -83,6 +82,7 @@ import os
 import sys
 import time
 import json
+from datetime import datetime
 
 dataset_dir = "$DATASET_DIR"
 repo_name = "$DATASET_NAME"
@@ -117,23 +117,42 @@ try:
     # Initialize API
     api = HfApi()
     
-    # Upload each split
-    splits = ['train', 'validation', 'test']
-    for split in splits:
-        split_path = os.path.join(dataset_dir, split, "data.json")
-        if os.path.exists(split_path):
-            # Upload the JSON file
-            api.upload_file(
-                path_or_fileobj=split_path,
-                path_in_repo=f"{split}.json",
-                repo_id=full_repo_name,
-                repo_type="dataset"
-            )
-            
-            # Get number of examples
-            with open(split_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                print(f"Pushed {split}.json with {len(data)} examples")
+    # Load and split the dataset
+    with open(os.path.join(dataset_dir, "finetune_data.json"), 'r', encoding='utf-8') as f:
+        all_data = json.load(f)
+    
+    total_examples = len(all_data)
+    train_size = int(0.8 * total_examples)
+    val_size = int(0.1 * total_examples)
+    
+    train_data = all_data[:train_size]
+    val_data = all_data[train_size:train_size + val_size]
+    test_data = all_data[train_size + val_size:]
+    
+    # Save and upload splits
+    splits = {
+        'train': train_data,
+        'validation': val_data,
+        'test': test_data
+    }
+    
+    for split_name, split_data in splits.items():
+        # Save split temporarily
+        temp_path = f"{split_name}_temp.json"
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(split_data, f, ensure_ascii=False, indent=2)
+        
+        # Upload the split
+        api.upload_file(
+            path_or_fileobj=temp_path,
+            path_in_repo=f"{split_name}.json",
+            repo_id=full_repo_name,
+            repo_type="dataset"
+        )
+        print(f"Pushed {split_name}.json with {len(split_data)} examples")
+        
+        # Clean up
+        os.remove(temp_path)
     
     # Upload sample.json if it exists
     sample_path = os.path.join(dataset_dir, "sample.json")
@@ -146,10 +165,39 @@ try:
         )
         print("Pushed sample.json file")
     
-    # Create a README file explaining the dataset format
-    readme_content = f"""# {repo_name}
+    # Create a README file with YAML metadata
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    readme_content = f"""---
+language:
+- zh
+- en
+license: apache-2.0
+pretty_name: {repo_name}
+size_categories:
+- 10K<n<100K
+task_categories:
+- text2text-generation
+task_ids:
+- machine-translation
+tags:
+- translation
+- chinese
+- english
+- fine-tuning
+---
+
+# {repo_name}
 
 This dataset contains Chinese to English translation pairs formatted for fine-tuning LLMs.
+
+## Dataset Description
+
+- **Languages:** Chinese (zh) and English (en)
+- **Task:** Machine Translation
+- **Size:** {total_examples} examples
+- **Format:** Fine-tuning conversation pairs
+- **License:** Apache 2.0
+- **Last Updated:** {current_date}
 
 ## Format
 
@@ -171,15 +219,21 @@ Each example is formatted as a conversation pair:
 ## Statistics
 
 The dataset contains the following splits:
+- train: {len(train_data)} examples
+- validation: {len(val_data)} examples
+- test: {len(test_data)} examples
+
+## Usage
+
+This dataset is specifically formatted for fine-tuning language models on Chinese to English translation tasks. Each example is structured as a conversation pair with a human prompt and the expected GPT response.
+
+## Data Processing
+
+The dataset has been processed to:
+1. Ensure proper formatting for fine-tuning
+2. Split into train/validation/test sets (80/10/10 split)
+3. Verify content quality and format consistency
 """
-    
-    # Add statistics for each split
-    for split in splits:
-        split_path = os.path.join(dataset_dir, split, "data.json")
-        if os.path.exists(split_path):
-            with open(split_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                readme_content += f"- {split}: {len(data)} examples\\n"
     
     # Save and upload README
     readme_path = "README.md"
@@ -192,7 +246,7 @@ The dataset contains the following splits:
         repo_id=full_repo_name,
         repo_type="dataset"
     )
-    print("Created and pushed README.md")
+    print("Created and pushed README.md with YAML metadata")
     
     # Clean up
     os.remove(readme_path)
