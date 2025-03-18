@@ -10,6 +10,7 @@ This tool helps you create a high-quality parallel corpus from Chinese and Engli
   - **Enhanced TF-IDF similarity matching** (robust for documents with different structures)
   - Sentence Transformer embeddings (best for semantically equivalent content in different languages)
 - Processes Chinese text with Jieba for word segmentation
+- Supports both traditional and simplified Chinese with automatic conversion
 - Language verification to filter out incorrect content
 - Two-pass alignment for higher quality matches
 - Creates dataset in Hugging Face format ready for fine-tuning
@@ -27,7 +28,7 @@ pip install -r requirements.txt
 Or install packages individually:
 
 ```bash
-pip install pdfplumber jieba nltk datasets tqdm scikit-learn numpy langdetect sentence-transformers
+pip install pdfplumber jieba nltk datasets tqdm scikit-learn numpy langdetect sentence-transformers OpenCC
 ```
 
 ## Usage
@@ -36,6 +37,12 @@ Basic usage:
 
 ```bash
 python create_translation_dataset.py --chinese_pdf path/to/chinese.pdf --english_pdf path/to/english.pdf
+```
+
+Process traditional Chinese PDF and convert to simplified:
+
+```bash
+python create_translation_dataset.py --chinese_pdf path/to/chinese.pdf --english_pdf path/to/english.pdf --to_simplified
 ```
 
 Process only first 20 pages (useful for testing or large PDFs):
@@ -47,7 +54,7 @@ python create_translation_dataset.py --chinese_pdf path/to/chinese.pdf --english
 Advanced usage with optimal settings for different document structures:
 
 ```bash
-python create_translation_dataset.py --chinese_pdf path/to/chinese.pdf --english_pdf path/to/english.pdf --alignment_method tfidf_similarity --verify_language --min_score 0.1
+python create_translation_dataset.py --chinese_pdf path/to/chinese.pdf --english_pdf path/to/english.pdf --alignment_method tfidf_similarity --verify_language --min_score 0.1 --to_simplified
 ```
 
 ### Arguments
@@ -59,6 +66,7 @@ python create_translation_dataset.py --chinese_pdf path/to/chinese.pdf --english
 - `--verify_language`: If provided, verify language of extracted paragraphs
 - `--min_score`: Minimum similarity score for alignment (default: 0.08)
 - `--max_pages`: Maximum number of pages to process from each PDF. If not specified, process all pages.
+- `--to_simplified`: If provided, convert traditional Chinese text to simplified Chinese
 
 ## Alignment Methods
 
