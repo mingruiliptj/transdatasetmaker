@@ -424,77 +424,131 @@ def generate_paragraph_report(chinese_paragraphs, english_paragraphs, output_dir
     <head>
         <meta charset="utf-8">
         <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            .container { display: flex; }
-            .column { flex: 1; padding: 10px; }
+            body { 
+                font-family: Arial, sans-serif; 
+                margin: 20px;
+                background-color: #f5f5f5;
+            }
+            .header {
+                background-color: white;
+                padding: 20px;
+                margin-bottom: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .grid-container {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                align-items: start;
+            }
+            .column-header {
+                background-color: white;
+                padding: 15px;
+                margin-bottom: 10px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .paragraph-pair {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                margin-bottom: 10px;
+            }
             .paragraph { 
-                margin-bottom: 20px; 
-                padding: 10px; 
-                border: 1px solid #ccc;
-                border-radius: 4px;
+                background-color: white;
+                padding: 15px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                height: 100%;
             }
             .paragraph-number {
                 font-weight: bold;
-                color: #666;
-                margin-bottom: 5px;
+                color: #444;
+                margin-bottom: 10px;
+                padding: 5px 10px;
+                background-color: #f8f9fa;
+                border-radius: 4px;
+                display: inline-block;
             }
             .text {
                 white-space: pre-wrap;
                 word-wrap: break-word;
+                line-height: 1.5;
+                margin-bottom: 10px;
             }
             .processed {
-                margin-top: 5px;
                 font-size: 0.9em;
                 color: #666;
-                border-top: 1px dashed #ccc;
-                padding-top: 5px;
+                border-top: 1px dashed #ddd;
+                padding-top: 10px;
+                margin-top: 10px;
             }
-            h2 { color: #333; }
+            h1 { 
+                color: #333;
+                margin: 0;
+            }
+            h2 { 
+                color: #444;
+                margin: 0;
+            }
+            .stats {
+                margin-top: 10px;
+                color: #666;
+            }
         </style>
     </head>
     <body>
-        <h1>Paragraph Split Report</h1>
-        <div class="container">
-            <div class="column">
-                <h2>Chinese Text (${len(chinese_paragraphs)} paragraphs)</h2>
-                ${chinese_paragraphs_html}
+        <div class="header">
+            <h1>Paragraph Split Report</h1>
+            <div class="stats">
+                Total paragraphs - Chinese: ${len(chinese_paragraphs)}, English: ${len(english_paragraphs)}
             </div>
-            <div class="column">
-                <h2>English Text (${len(english_paragraphs)} paragraphs)</h2>
-                ${english_paragraphs_html}
-            </div>
+        </div>
+        
+        <div class="grid-container">
+            ${paragraph_pairs_html}
         </div>
     </body>
     </html>
     """
     
-    # Generate HTML for Chinese paragraphs
-    chinese_html = []
-    for i, para in enumerate(chinese_paragraphs):
-        chinese_html.append(f"""
-        <div class="paragraph">
-            <div class="paragraph-number">Paragraph {i+1}</div>
-            <div class="text">{para['text']}</div>
-            <div class="processed">Processed: {para['processed']}</div>
-        </div>
-        """)
+    # Generate HTML for paragraph pairs
+    paragraph_pairs = []
+    max_pairs = max(len(chinese_paragraphs), len(english_paragraphs))
     
-    # Generate HTML for English paragraphs
-    english_html = []
-    for i, para in enumerate(english_paragraphs):
-        english_html.append(f"""
+    for i in range(max_pairs):
+        zh_para = chinese_paragraphs[i] if i < len(chinese_paragraphs) else None
+        en_para = english_paragraphs[i] if i < len(english_paragraphs) else None
+        
+        zh_html = f"""
         <div class="paragraph">
-            <div class="paragraph-number">Paragraph {i+1}</div>
-            <div class="text">{para['text']}</div>
-            <div class="processed">Processed: {para['processed']}</div>
+            <div class="paragraph-number">Chinese #{i+1}</div>
+            <div class="text">{zh_para['text'] if zh_para else '(No paragraph)'}</div>
+            <div class="processed">Processed: {zh_para['processed'] if zh_para else ''}</div>
         </div>
-        """)
+        """ if zh_para or i < len(english_paragraphs) else ""
+        
+        en_html = f"""
+        <div class="paragraph">
+            <div class="paragraph-number">English #{i+1}</div>
+            <div class="text">{en_para['text'] if en_para else '(No paragraph)'}</div>
+            <div class="processed">Processed: {en_para['processed'] if en_para else ''}</div>
+        </div>
+        """ if en_para or i < len(chinese_paragraphs) else ""
+        
+        if zh_html or en_html:
+            paragraph_pairs.append(f"""
+            <div class="paragraph-pair">
+                {zh_html}
+                {en_html}
+            </div>
+            """)
     
-    # Replace placeholders in template
+    # Replace placeholder in template
     html_content = html_content.replace("${len(chinese_paragraphs)}", str(len(chinese_paragraphs)))
     html_content = html_content.replace("${len(english_paragraphs)}", str(len(english_paragraphs)))
-    html_content = html_content.replace("${chinese_paragraphs_html}", "\n".join(chinese_html))
-    html_content = html_content.replace("${english_paragraphs_html}", "\n".join(english_html))
+    html_content = html_content.replace("${paragraph_pairs_html}", "\n".join(paragraph_pairs))
     
     # Save the report
     report_path = os.path.join(output_dir, "paragraph_split_report.html")
