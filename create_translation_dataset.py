@@ -1,7 +1,6 @@
 import os
 import argparse
 import re
-import pdfplumber
 import json
 import jieba
 import nltk
@@ -27,38 +26,78 @@ def convert_to_simplified(text):
     converter = opencc.OpenCC('t2s')  # Traditional to Simplified
     return converter.convert(text)
 
-def extract_text_from_pdf(pdf_path, max_pages=None):
-    """Extract text from a PDF file using pdfplumber.
+def read_text_file(file_path, max_lines=None):
+    """Read text from a plain text file.
     
     Args:
-        pdf_path: Path to the PDF file
-        max_pages: Maximum number of pages to process. If None, process all pages.
+        file_path: Path to the text file
+        max_lines: Maximum number of lines to process. If None, process all lines.
     """
-    if not os.path.exists(pdf_path):
-        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Text file not found: {file_path}")
         
-    text_by_page = []
+    text_content = []
     
-    with pdfplumber.open(pdf_path) as pdf:
-        # Get the pages to process
-        total_pages = len(pdf.pages)
-        if total_pages == 0:
-            raise ValueError(f"PDF file is empty: {pdf_path}")
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
             
-        pages_to_process = min(max_pages, total_pages) if max_pages else total_pages
+        if max_lines:
+            lines = lines[:max_lines]
+            
+        # Group lines into paragraphs (separated by empty lines)
+        current_paragraph = []
+        for line in lines:
+            line = line.strip()
+            if line:
+                current_paragraph.append(line)
+            elif current_paragraph:  # Empty line and we have content
+                text_content.append(' '.join(current_paragraph))
+                current_paragraph = []
+                
+        # Add the last paragraph if it exists
+        if current_paragraph:
+            text_content.append(' '.join(current_paragraph))
+            
+        if not text_content:
+            raise ValueError(f"No valid text content could be extracted from: {file_path}")
+            
+        print(f"Successfully extracted {len(text_content)} paragraphs from {file_path}")
+        return text_content
         
-        print(f"Processing {pages_to_process} pages out of {total_pages} total pages")
-        for page_num in tqdm(range(pages_to_process), desc=f"Extracting text from {os.path.basename(pdf_path)}"):
-            text = pdf.pages[page_num].extract_text()
-            # Only append non-empty pages
-            if text and text.strip():
-                text_by_page.append(text)
-    
-    if not text_by_page:
-        raise ValueError(f"No text could be extracted from PDF: {pdf_path}")
-    
-    print(f"Successfully extracted text from {len(text_by_page)} non-empty pages")
-    return text_by_page
+    except UnicodeDecodeError:
+        # Try with different encodings if UTF-8 fails
+        encodings = ['gb18030', 'big5', 'latin1']
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    lines = f.readlines()
+                if max_lines:
+                    lines = lines[:max_lines]
+                    
+                # Group lines into paragraphs
+                current_paragraph = []
+                for line in lines:
+                    line = line.strip()
+                    if line:
+                        current_paragraph.append(line)
+                    elif current_paragraph:
+                        text_content.append(' '.join(current_paragraph))
+                        current_paragraph = []
+                        
+                if current_paragraph:
+                    text_content.append(' '.join(current_paragraph))
+                    
+                if not text_content:
+                    continue
+                    
+                print(f"Successfully extracted {len(text_content)} paragraphs from {file_path} using {encoding} encoding")
+                return text_content
+                
+            except UnicodeDecodeError:
+                continue
+                
+        raise ValueError(f"Could not decode file {file_path} with any supported encoding")
 
 def preprocess_chinese_text(pages, to_simplified=False):
     """Preprocess Chinese text and segment into paragraphs.
@@ -372,42 +411,42 @@ def split_dataset(dataset, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, seed=
     }
 
 def main():
-    parser = argparse.ArgumentParser(description="Create translation dataset from Chinese and English PDFs")
-    parser.add_argument("--chinese_pdf", required=True, help="Path to Chinese PDF")
-    parser.add_argument("--english_pdf", required=True, help="Path to English PDF")
+    parser = argparse.ArgumentParser(description="Create translation dataset from Chinese and English text files")
+    parser.add_argument("--chinese_text", required=True, help="Path to Chinese text file")
+    parser.add_argument("--english_text", required=True, help="Path to English text file")
     parser.add_argument("--output_dir", default="translation_dataset", help="Directory to save the dataset")
     parser.add_argument("--alignment_method", choices=["length_based", "tfidf_similarity", "sentence_transformer"], 
                         default="tfidf_similarity", help="Method for paragraph alignment")
     parser.add_argument("--verify_language", action="store_true", help="Verify language of paragraphs")
     parser.add_argument("--min_score", type=float, default=0.08, help="Minimum similarity score for alignment")
-    parser.add_argument("--max_pages", type=int, default=None, 
-                        help="Maximum number of pages to process from each PDF. If not specified, process all pages.")
+    parser.add_argument("--max_lines", type=int, default=None, 
+                        help="Maximum number of lines to process from each text file. If not specified, process all lines.")
     parser.add_argument("--to_simplified", action="store_true",
                         help="Convert traditional Chinese to simplified Chinese")
     args = parser.parse_args()
     
     try:
-        # Extract text from PDFs
-        print("Extracting text from PDFs...")
-        chinese_pages = extract_text_from_pdf(args.chinese_pdf, args.max_pages)
-        english_pages = extract_text_from_pdf(args.english_pdf, args.max_pages)
+        # Extract text from text files
+        print("Reading text files...")
+        chinese_paragraphs = read_text_file(args.chinese_text, args.max_lines)
+        english_paragraphs = read_text_file(args.english_text, args.max_lines)
         
-        if not chinese_pages or not english_pages:
-            raise ValueError("No text could be extracted from one or both PDFs")
+        if not chinese_paragraphs or not english_paragraphs:
+            raise ValueError("No text could be extracted from one or both text files")
         
         # Preprocess text and segment into paragraphs
         print("Preprocessing Chinese text...")
         if args.to_simplified:
             print("Converting traditional Chinese to simplified Chinese...")
-        chinese_paragraphs = preprocess_chinese_text(chinese_pages, to_simplified=args.to_simplified)
+        chinese_paragraphs = preprocess_chinese_text(chinese_paragraphs, to_simplified=args.to_simplified)
         print(f"Extracted {len(chinese_paragraphs)} Chinese paragraphs")
         
         print("Preprocessing English text...")
-        english_paragraphs = preprocess_english_text(english_pages)
+        english_paragraphs = preprocess_english_text(english_paragraphs)
         print(f"Extracted {len(english_paragraphs)} English paragraphs")
         
         if not chinese_paragraphs or not english_paragraphs:
-            raise ValueError("No valid paragraphs could be extracted from one or both PDFs")
+            raise ValueError("No valid paragraphs could be extracted from one or both text files")
         
         # Optionally verify language
         if args.verify_language:
@@ -452,9 +491,9 @@ def main():
     except Exception as e:
         print(f"\nError: {str(e)}")
         print("\nPlease check that:")
-        print("1. Both PDF files exist and are readable")
-        print("2. PDFs contain extractable text (not scanned images)")
-        print("3. PDFs contain sufficient non-empty pages")
+        print("1. Both text files exist and are readable")
+        print("2. Text files contain extractable text (not scanned images)")
+        print("3. Text files contain sufficient non-empty lines")
         print("4. Text is properly encoded and contains actual content")
         sys.exit(1)
 
