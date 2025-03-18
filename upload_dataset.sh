@@ -49,9 +49,12 @@ if [ ! -d "$DATASET_DIR" ]; then
     exit 1
 fi
 
-# Check if required files exist
-if [ ! -f "$DATASET_DIR/finetune_data.json" ]; then
-    echo "Error: 'finetune_data.json' not found in $DATASET_DIR"
+# Check if required files exist (either Arrow or JSON format)
+if [ ! -f "$DATASET_DIR/data-00000-of-00001.arrow" ] && [ ! -f "$DATASET_DIR/finetune_data.json" ]; then
+    echo "Error: No valid dataset file found in $DATASET_DIR"
+    echo "Expected either:"
+    echo "  - data-00000-of-00001.arrow (Arrow format)"
+    echo "  - finetune_data.json (JSON format)"
     exit 1
 fi
 
@@ -78,6 +81,7 @@ echo "Privacy setting: public"
 TMP_SCRIPT=$(mktemp)
 cat > "$TMP_SCRIPT" << EOL
 from huggingface_hub import HfApi, create_repo, whoami
+from datasets import load_from_disk
 import os
 import sys
 import time
@@ -117,17 +121,42 @@ try:
     # Initialize API
     api = HfApi()
     
-    # Load and split the dataset
-    with open(os.path.join(dataset_dir, "finetune_data.json"), 'r', encoding='utf-8') as f:
-        all_data = json.load(f)
+    # Check if we have Arrow or JSON format
+    is_arrow_format = os.path.exists(os.path.join(dataset_dir, "data-00000-of-00001.arrow"))
     
-    total_examples = len(all_data)
-    train_size = int(0.8 * total_examples)
-    val_size = int(0.1 * total_examples)
-    
-    train_data = all_data[:train_size]
-    val_data = all_data[train_size:train_size + val_size]
-    test_data = all_data[train_size + val_size:]
+    if is_arrow_format:
+        # Load dataset in Arrow format
+        dataset = load_from_disk(dataset_dir)
+        total_examples = len(dataset)
+        
+        # Convert to finetune format
+        finetune_data = []
+        for example in dataset:
+            message_pair = [
+                {"from": "human", "value": f"translate following chinese into english -- {example['translation']['zh']}"},
+                {"from": "gpt", "value": f"{example['translation']['en']}"}
+            ]
+            finetune_data.append(message_pair)
+        
+        # Split the data
+        train_size = int(0.8 * total_examples)
+        val_size = int(0.1 * total_examples)
+        
+        train_data = finetune_data[:train_size]
+        val_data = finetune_data[train_size:train_size + val_size]
+        test_data = finetune_data[train_size + val_size:]
+    else:
+        # Load JSON format
+        with open(os.path.join(dataset_dir, "finetune_data.json"), 'r', encoding='utf-8') as f:
+            all_data = json.load(f)
+        
+        total_examples = len(all_data)
+        train_size = int(0.8 * total_examples)
+        val_size = int(0.1 * total_examples)
+        
+        train_data = all_data[:train_size]
+        val_data = all_data[train_size:train_size + val_size]
+        test_data = all_data[train_size + val_size:]
     
     # Save and upload splits
     splits = {
