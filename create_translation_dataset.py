@@ -103,7 +103,7 @@ def preprocess_chinese_text(pages, to_simplified=False):
         for para in page_paragraphs:
             # Clean the paragraph
             para = para.strip()
-            if para and len(para) > 10:  # Filter out very short paragraphs
+            if para:
                 # Use jieba for word segmentation
                 seg_list = jieba.cut(para)
                 processed_para = " ".join(seg_list)
@@ -122,7 +122,7 @@ def preprocess_english_text(pages):
         for para in page_paragraphs:
             # Clean the paragraph
             para = para.strip()
-            if para and len(para) > 10:  # Filter out very short paragraphs
+            if para:  # Filter out very short paragraphs
                 # Tokenize into words
                 words = re.findall(r'\b\w+\b', para.lower())
                 processed_para = " ".join(words)
