@@ -30,76 +30,54 @@ def convert_to_simplified(text):
     return converter.convert(text)
 
 def read_text_file(file_path, max_lines=None):
-    """Read text from a plain text file.
-    
+    """Read text from a plain text file, handling paragraphs separated by double newlines.
+
     Args:
-        file_path: Path to the text file
-        max_lines: Maximum number of lines to process. If None, process all lines.
+        file_path: Path to the text file.
+        max_lines: Maximum number of lines to process (not paragraphs). If None, process all content.
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Text file not found: {file_path}")
-        
-    text_content = []
-    
+
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            
+            content = f.read()
+
+        # Split content into paragraphs based on double newlines (Windows or Linux)
+        paragraphs = re.split(r'(\r?\n){2,}', content)
+        text_content = [p.strip() for p in paragraphs if p.strip()]
+
         if max_lines:
-            lines = lines[:max_lines]
-            
-        # Group lines into paragraphs (separated by empty lines)
-        current_paragraph = []
-        for line in lines:
-            line = line.strip()
-            if line:
-                current_paragraph.append(line)
-            elif current_paragraph:  # Empty line and we have content
-                text_content.append(' '.join(current_paragraph))
-                current_paragraph = []
-                
-        # Add the last paragraph if it exists
-        if current_paragraph:
-            text_content.append(' '.join(current_paragraph))
-            
+            text_content = text_content[:max_lines] # Note: max_lines is applied to paragraphs now, not lines
+
         if not text_content:
             raise ValueError(f"No valid text content could be extracted from: {file_path}")
-            
+
         print(f"Successfully extracted {len(text_content)} paragraphs from {file_path}")
         return text_content
-        
+
     except UnicodeDecodeError:
         # Try with different encodings if UTF-8 fails
         encodings = ['gb18030', 'big5', 'latin1']
         for encoding in encodings:
             try:
                 with open(file_path, 'r', encoding=encoding) as f:
-                    lines = f.readlines()
+                    content = f.read()
+                paragraphs = re.split(r'(\r?\n){2,}', content)
+                text_content = [p.strip() for p in paragraphs if p.strip()]
+
                 if max_lines:
-                    lines = lines[:max_lines]
-                    
-                # Group lines into paragraphs
-                current_paragraph = []
-                for line in lines:
-                    line = line.strip()
-                    if line:
-                        current_paragraph.append(line)
-                    elif current_paragraph:
-                        text_content.append(' '.join(current_paragraph))
-                        current_paragraph = []
-                        
-                if current_paragraph:
-                    text_content.append(' '.join(current_paragraph))
-                    
+                    text_content = text_content[:max_lines]
+
                 if not text_content:
                     continue
-                    
+
                 print(f"Successfully extracted {len(text_content)} paragraphs from {file_path} using {encoding} encoding")
                 return text_content
-                
+
             except UnicodeDecodeError:
                 continue
-                
+
         raise ValueError(f"Could not decode file {file_path} with any supported encoding")
 
 def preprocess_chinese_text(pages, to_simplified=False):
@@ -647,4 +625,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main() 
+    main()
