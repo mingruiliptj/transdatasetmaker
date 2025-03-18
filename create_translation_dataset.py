@@ -174,182 +174,22 @@ def verify_language(paragraphs, expected_lang):
     
     return verified_paragraphs
 
-def align_paragraphs(chinese_paragraphs, english_paragraphs, method="tfidf_similarity"):
+def create_huggingface_dataset(chinese_paragraphs, english_paragraphs, output_dir="translation_dataset"):
+    """Create and save the dataset in Hugging Face format.
+    Assumes paragraphs are already aligned in the input files.
     """
-    Align Chinese and English paragraphs.
+    # Take the minimum length to ensure we have pairs
+    min_len = min(len(chinese_paragraphs), len(english_paragraphs))
     
-    Methods:
-    - length_based: Simple alignment based on relative paragraph lengths
-    - tfidf_similarity: Alignment based on TF-IDF vector similarity
-    - sentence_transformer: Alignment based on multilingual sentence embeddings
-    """
-    # Validate input
-    if not chinese_paragraphs or not english_paragraphs:
-        raise ValueError("Both Chinese and English paragraphs must not be empty")
+    # Create pairs directly from the paragraphs in order
+    aligned_pairs = [
+        {
+            "chinese": chinese_paragraphs[i]["text"],
+            "english": english_paragraphs[i]["text"]
+        }
+        for i in range(min_len)
+    ]
     
-    aligned_pairs = []
-    
-    if method == "length_based":
-        # Simple length-based alignment assuming paragraphs appear in same order
-        # This is a naive approach and works only if both PDFs have the same structure
-        total_zh = len(chinese_paragraphs)
-        total_en = len(english_paragraphs)
-        
-        # Use the shorter document as reference
-        shorter_len = min(total_zh, total_en)
-        
-        # Calculate ratio for alignment
-        ratio = total_zh / total_en if total_en < total_zh else total_en / total_zh
-        
-        for i in range(shorter_len):
-            if total_zh <= total_en:
-                zh_idx = i
-                en_idx = int(i * ratio)
-            else:
-                zh_idx = int(i * ratio)
-                en_idx = i
-                
-            if zh_idx < total_zh and en_idx < total_en:
-                aligned_pairs.append({
-                    "chinese": chinese_paragraphs[zh_idx]["text"],
-                    "english": english_paragraphs[en_idx]["text"]
-                })
-    
-    elif method == "tfidf_similarity":
-        # More advanced method using TF-IDF and cosine similarity
-        print("Using TF-IDF similarity for paragraph alignment")
-        
-        # Create TF-IDF vectors for processed paragraphs
-        all_processed_texts = [p["processed"] for p in chinese_paragraphs + english_paragraphs]
-        
-        try:
-            # Increase min_df to filter out rare terms that might just be noise
-            # and max_df to filter out terms that appear in too many documents
-            vectorizer = TfidfVectorizer(min_df=1, max_df=0.95, ngram_range=(1, 2))
-            tfidf_matrix = vectorizer.fit_transform(all_processed_texts)
-            
-            # Extract Chinese and English parts of the matrix
-            zh_vectors = tfidf_matrix[:len(chinese_paragraphs)]
-            en_vectors = tfidf_matrix[len(chinese_paragraphs):]
-            
-            # Compute similarity between all Chinese and English paragraphs
-            print("Computing similarity matrix...")
-            similarity_matrix = cosine_similarity(zh_vectors, en_vectors)
-            
-            # For each Chinese paragraph, find the most similar English paragraph
-            used_en_indices = set()
-            
-            # First pass: High confidence matches
-            for zh_idx, similarities in enumerate(similarity_matrix):
-                en_idx = np.argmax(similarities)
-                score = similarities[en_idx]
-                
-                # Only keep alignments with high similarity
-                if score > 0.15 and en_idx not in used_en_indices:  # Higher threshold for first pass
-                    aligned_pairs.append({
-                        "chinese": chinese_paragraphs[zh_idx]["text"],
-                        "english": english_paragraphs[en_idx]["text"],
-                        "score": float(score)
-                    })
-                    used_en_indices.add(en_idx)
-            
-            # Second pass: For Chinese paragraphs without a match, use a lower threshold
-            for zh_idx, similarities in enumerate(similarity_matrix):
-                # Skip if this Chinese paragraph already has a match
-                if any(pair["chinese"] == chinese_paragraphs[zh_idx]["text"] for pair in aligned_pairs):
-                    continue
-                    
-                # Find best unused English paragraph
-                sorted_indices = np.argsort(-similarities)  # Sort in descending order
-                
-                for en_idx in sorted_indices:
-                    score = similarities[en_idx]
-                    
-                    # Use a lower threshold but still ensure some similarity
-                    if score > 0.08 and en_idx not in used_en_indices:
-                        aligned_pairs.append({
-                            "chinese": chinese_paragraphs[zh_idx]["text"],
-                            "english": english_paragraphs[en_idx]["text"],
-                            "score": float(score)
-                        })
-                        used_en_indices.add(en_idx)
-                        break
-                        
-        except ValueError as e:
-            print(f"Warning: TF-IDF alignment failed ({str(e)}), falling back to length-based alignment")
-            return align_paragraphs(chinese_paragraphs, english_paragraphs, method="length_based")
-    
-    elif method == "sentence_transformer":
-        if not chinese_paragraphs or not english_paragraphs:
-            print("Warning: Empty paragraphs detected, falling back to length-based alignment")
-            return align_paragraphs(chinese_paragraphs, english_paragraphs, method="length_based")
-            
-        print("Using SentenceTransformer for paragraph alignment")
-        
-        # Load a multilingual sentence transformer model
-        model = SentenceTransformer('distiluse-base-multilingual-cased-v1')
-        
-        # Extract text for embedding
-        chinese_texts = [p["text"] for p in chinese_paragraphs]
-        english_texts = [p["text"] for p in english_paragraphs]
-        
-        # Create embeddings in batches
-        print("Generating Chinese embeddings...")
-        chinese_embeddings = model.encode(chinese_texts, show_progress_bar=True, batch_size=16)
-        
-        print("Generating English embeddings...")
-        english_embeddings = model.encode(english_texts, show_progress_bar=True, batch_size=16)
-        
-        # Compute cosine similarity
-        print("Computing similarity matrix...")
-        similarity_matrix = cosine_similarity(chinese_embeddings, english_embeddings)
-        
-        # For each Chinese paragraph, find the most similar English paragraph
-        used_en_indices = set()
-        
-        # First pass with higher threshold
-        for zh_idx, similarities in enumerate(similarity_matrix):
-            en_idx = np.argmax(similarities)
-            score = similarities[en_idx]
-            
-            if score > 0.6 and en_idx not in used_en_indices:  # Higher threshold for first pass
-                aligned_pairs.append({
-                    "chinese": chinese_paragraphs[zh_idx]["text"],
-                    "english": english_paragraphs[en_idx]["text"],
-                    "score": float(score)
-                })
-                used_en_indices.add(en_idx)
-        
-        # Second pass with lower threshold
-        for zh_idx, similarities in enumerate(similarity_matrix):
-            if any(pair["chinese"] == chinese_paragraphs[zh_idx]["text"] for pair in aligned_pairs):
-                continue
-                
-            sorted_indices = np.argsort(-similarities)
-            
-            for en_idx in sorted_indices:
-                score = similarities[en_idx]
-                
-                if score > 0.4 and en_idx not in used_en_indices:
-                    aligned_pairs.append({
-                        "chinese": chinese_paragraphs[zh_idx]["text"],
-                        "english": english_paragraphs[en_idx]["text"],
-                        "score": float(score)
-                    })
-                    used_en_indices.add(en_idx)
-                    break
-    
-    # Sort the aligned pairs by score if available
-    if aligned_pairs and "score" in aligned_pairs[0]:
-        aligned_pairs.sort(key=lambda x: x["score"], reverse=True)
-    
-    if not aligned_pairs:
-        raise ValueError("No paragraph pairs could be aligned. Please check your input PDFs.")
-    
-    return aligned_pairs
-
-def create_huggingface_dataset(aligned_pairs, output_dir="translation_dataset"):
-    """Create and save the dataset in Hugging Face format."""
     # Prepare data in the format expected by the Dataset.from_dict method
     dataset_dict = {
         "translation": [
@@ -564,10 +404,7 @@ def main():
     parser.add_argument("--chinese_text", required=True, help="Path to Chinese text file")
     parser.add_argument("--english_text", required=True, help="Path to English text file")
     parser.add_argument("--output_dir", default="translation_dataset", help="Directory to save the dataset")
-    parser.add_argument("--alignment_method", choices=["length_based", "tfidf_similarity", "sentence_transformer"], 
-                        default="tfidf_similarity", help="Method for paragraph alignment")
     parser.add_argument("--verify_language", action="store_true", help="Verify language of paragraphs")
-    parser.add_argument("--min_score", type=float, default=0.08, help="Minimum similarity score for alignment")
     parser.add_argument("--max_lines", type=int, default=None, 
                         help="Maximum number of lines to process from each text file. If not specified, process all lines.")
     parser.add_argument("--to_simplified", action="store_true",
@@ -626,23 +463,9 @@ def main():
             if not chinese_paragraphs or not english_paragraphs:
                 raise ValueError("No valid paragraphs remained after language verification")
         
-        # Align paragraphs
-        print(f"\nAligning paragraphs using {args.alignment_method} method...")
-        aligned_pairs = align_paragraphs(chinese_paragraphs, english_paragraphs, method=args.alignment_method)
-        print(f"Created {len(aligned_pairs)} aligned paragraph pairs")
-        
-        # Filter by score if applicable
-        if args.alignment_method in ["tfidf_similarity", "sentence_transformer"] and args.min_score > 0:
-            original_count = len(aligned_pairs)
-            aligned_pairs = [pair for pair in aligned_pairs if pair.get("score", 1.0) >= args.min_score]
-            print(f"Filtered down to {len(aligned_pairs)} pairs with score >= {args.min_score} (removed {original_count - len(aligned_pairs)} pairs)")
-            
-            if not aligned_pairs:
-                raise ValueError(f"No pairs remained after filtering with min_score={args.min_score}")
-        
-        # Create dataset
+        # Create dataset directly from paragraphs
         print("\nCreating Hugging Face dataset...")
-        dataset = create_huggingface_dataset(aligned_pairs, output_dir=args.output_dir)
+        dataset = create_huggingface_dataset(chinese_paragraphs, english_paragraphs, output_dir=args.output_dir)
         
         # Split dataset
         print("Splitting dataset into train/validation/test sets...")
