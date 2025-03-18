@@ -81,7 +81,7 @@ echo "Privacy setting: public"
 TMP_SCRIPT=$(mktemp)
 cat > "$TMP_SCRIPT" << EOL
 from huggingface_hub import HfApi, create_repo, whoami
-from datasets import load_from_disk
+from datasets import load_from_disk, Dataset
 import os
 import sys
 import time
@@ -129,36 +129,51 @@ try:
         dataset = load_from_disk(dataset_dir)
         total_examples = len(dataset)
         
-        # Convert to finetune format
-        finetune_data = []
+        # Format for Sloth - each example needs a "conversations" field with a list of messages
+        sloth_data = []
         for example in dataset:
-            message_pair = [
-                {"from": "human", "value": f"translate following chinese into english -- {example['translation']['zh']}"},
-                {"from": "gpt", "value": f"{example['translation']['en']}"}
+            # Create a conversation with human and assistant messages
+            conversation = [
+                {"role": "user", "content": f"translate following chinese into english -- {example['translation']['zh']}"},
+                {"role": "assistant", "content": f"{example['translation']['en']}"}
             ]
-            finetune_data.append(message_pair)
+            
+            # Add to our dataset
+            sloth_data.append({"conversations": conversation})
         
         # Split the data
         train_size = int(0.8 * total_examples)
         val_size = int(0.1 * total_examples)
         
-        train_data = finetune_data[:train_size]
-        val_data = finetune_data[train_size:train_size + val_size]
-        test_data = finetune_data[train_size + val_size:]
+        train_data = sloth_data[:train_size]
+        val_data = sloth_data[train_size:train_size + val_size]
+        test_data = sloth_data[train_size + val_size:]
     else:
         # Load JSON format
         with open(os.path.join(dataset_dir, "finetune_data.json"), 'r', encoding='utf-8') as f:
             all_data = json.load(f)
         
-        total_examples = len(all_data)
+        # Format for Sloth
+        sloth_data = []
+        for message_pair in all_data:
+            # Convert from human/gpt format to user/assistant format
+            conversation = [
+                {"role": "user", "content": message_pair[0]["value"]},
+                {"role": "assistant", "content": message_pair[1]["value"]}
+            ]
+            
+            # Add to our dataset
+            sloth_data.append({"conversations": conversation})
+        
+        total_examples = len(sloth_data)
         train_size = int(0.8 * total_examples)
         val_size = int(0.1 * total_examples)
         
-        train_data = all_data[:train_size]
-        val_data = all_data[train_size:train_size + val_size]
-        test_data = all_data[train_size + val_size:]
+        train_data = sloth_data[:train_size]
+        val_data = sloth_data[train_size:train_size + val_size]
+        test_data = sloth_data[train_size + val_size:]
     
-    # Save and upload splits
+    # Save and upload splits as Hugging Face datasets
     splits = {
         'train': train_data,
         'validation': val_data,
@@ -166,33 +181,21 @@ try:
     }
     
     for split_name, split_data in splits.items():
-        # Save split temporarily
-        temp_path = f"{split_name}_temp.json"
-        with open(temp_path, 'w', encoding='utf-8') as f:
-            json.dump(split_data, f, ensure_ascii=False, indent=2)
+        # Create dataset
+        hf_dataset = Dataset.from_list(split_data)
         
-        # Upload the split
-        api.upload_file(
-            path_or_fileobj=temp_path,
-            path_in_repo=f"{split_name}.json",
-            repo_id=full_repo_name,
-            repo_type="dataset"
-        )
-        print(f"Pushed {split_name}.json with {len(split_data)} examples")
+        # Save split temporarily
+        temp_dir = f"{split_name}_temp"
+        os.makedirs(temp_dir, exist_ok=True)
+        hf_dataset.save_to_disk(temp_dir)
+        
+        # Push to hub
+        hf_dataset.push_to_hub(full_repo_name, split=split_name)
+        print(f"Pushed {split_name} split with {len(split_data)} examples")
         
         # Clean up
-        os.remove(temp_path)
-    
-    # Upload sample.json if it exists
-    sample_path = os.path.join(dataset_dir, "sample.json")
-    if os.path.exists(sample_path):
-        api.upload_file(
-            path_or_fileobj=sample_path,
-            path_in_repo="sample.json",
-            repo_id=full_repo_name,
-            repo_type="dataset"
-        )
-        print("Pushed sample.json file")
+        import shutil
+        shutil.rmtree(temp_dir)
     
     # Create a README file with YAML metadata
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -213,36 +216,50 @@ tags:
 - chinese
 - english
 - fine-tuning
+- sloth
 ---
 
 # {repo_name}
 
-This dataset contains Chinese to English translation pairs formatted for fine-tuning LLMs.
+This dataset contains Chinese to English translation pairs formatted for fine-tuning LLMs, compatible with Sloth fine-tuning framework.
 
 ## Dataset Description
 
 - **Languages:** Chinese (zh) and English (en)
 - **Task:** Machine Translation
 - **Size:** {total_examples} examples
-- **Format:** Fine-tuning conversation pairs
+- **Format:** Conversation pairs for Sloth fine-tuning
 - **License:** Apache 2.0
 - **Last Updated:** {current_date}
 
 ## Format
 
-Each example is formatted as a conversation pair:
+Each example is formatted with a "conversations" key containing a list of messages:
 
 ```json
-[
-  {{
-    "from": "human",
-    "value": "translate following chinese into english -- [Chinese Text]"
-  }},
-  {{
-    "from": "gpt",
-    "value": "[English Translation]"
-  }}
-]
+{{
+  "conversations": [
+    {{
+      "role": "user",
+      "content": "translate following chinese into english -- [Chinese Text]"
+    }},
+    {{
+      "role": "assistant", 
+      "content": "[English Translation]"
+    }}
+  ]
+}}
+```
+
+## Sloth Fine-tuning Example
+
+When using Sloth for fine-tuning, use code like this:
+
+```python
+def formatting_prompts_func(examples):
+    convos = examples["conversations"]
+    texts = [tokenizer.apply_chat_template(convo, tokenize=False, add_generation_prompt=False) for convo in convos]
+    return {{"text": texts}}
 ```
 
 ## Statistics
@@ -254,14 +271,7 @@ The dataset contains the following splits:
 
 ## Usage
 
-This dataset is specifically formatted for fine-tuning language models on Chinese to English translation tasks. Each example is structured as a conversation pair with a human prompt and the expected GPT response.
-
-## Data Processing
-
-The dataset has been processed to:
-1. Ensure proper formatting for fine-tuning
-2. Split into train/validation/test sets (80/10/10 split)
-3. Verify content quality and format consistency
+This dataset is specifically formatted for fine-tuning language models on Chinese to English translation tasks using the Sloth framework.
 """
     
     # Save and upload README
@@ -281,6 +291,7 @@ The dataset has been processed to:
     os.remove(readme_path)
     
     print(f"\\nDataset successfully uploaded to: https://huggingface.co/datasets/{full_repo_name}")
+    print(f"The dataset is formatted for Sloth fine-tuning with the 'conversations' field.")
     
 except Exception as e:
     print(f"Error: {str(e)}")
