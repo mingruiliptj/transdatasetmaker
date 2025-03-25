@@ -458,9 +458,7 @@ def push_to_hub(dataset_dir, repo_name, private=True):
         repo_name: Base name for the repository
         private: Whether to create a private repository
     """
-    # Generate a unique repository name with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    full_repo_name = f"{repo_name}_{timestamp}"
+    full_repo_name = f"{repo_name}"
     
     print(f"\nPushing dataset to Hugging Face Hub as '{full_repo_name}'...")
     
