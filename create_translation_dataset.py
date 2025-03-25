@@ -523,7 +523,7 @@ def main():
                         help="Push the dataset to Hugging Face Hub")
     parser.add_argument("--repo_name", default="zh_en_translation",
                         help="Base name for the Hugging Face dataset repository")
-    parser.add_argument("--private", action="store_true", default=True,
+    parser.add_argument("--private", action="store_true", default=False,
                         help="Whether to create a private repository")
     parser.add_argument("--finetune_format", action="store_true",
                         help="Create dataset in fine-tuning format with human/gpt message pairs")
