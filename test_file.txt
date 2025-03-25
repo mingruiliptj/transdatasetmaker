@@ -1,6 +1,4 @@
-This is line 1.
-12345
-This is line 3.
-    67890   
-Another line.
-123  456
+This is a test. This is a single newline.
+
+This is a double newline. This is another single newline.
+

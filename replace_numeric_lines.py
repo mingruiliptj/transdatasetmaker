@@ -7,7 +7,7 @@ def replace_numeric_lines(filename):
     Writes the modified content to a new file with '_modified' appended to the original filename.
     """
     try:
-        with open(filename, 'r') as infile:
+        with open(filename, 'r', encoding='utf-8') as infile:
             lines = infile.readlines()
 
         modified_lines = []
@@ -21,7 +21,7 @@ def replace_numeric_lines(filename):
         # Create a new filename for the modified file
         output_filename = filename.rsplit('.', 1)[0] + '_modified.' + filename.rsplit('.', 1)[1]
 
-        with open(output_filename, 'w') as outfile:
+        with open(output_filename, 'w', encoding='utf-8') as outfile:
             outfile.writelines(modified_lines)
 
         print(f"Modified file saved as: {output_filename}")
