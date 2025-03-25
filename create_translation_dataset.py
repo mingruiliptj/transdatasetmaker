@@ -125,11 +125,11 @@ def preprocess_english_text(pages):
         
         for para in page_paragraphs:
             # Clean the paragraph
-            para = para.strip()
+            para = para.strip().replace("\n", "")
             if para:  # Filter out very short paragraphs
                 # Tokenize into words
                 words = re.findall(r'\b\w+\b', para.lower())
-                processed_para = " ".join(words)
+                processed_para = " ".join(words).replace("\n", "")
                 paragraphs.append({"text": para, "processed": processed_para.replace("\n", "")})
     
     return paragraphs
